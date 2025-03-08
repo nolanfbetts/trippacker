@@ -40,7 +40,7 @@ const PRODUCT_MAPPINGS = {
     description: 'All-in-one international power adapter with USB ports',
   },
   
-  // Comfort
+  // Comfort & Health
   'hydro flask': {
     asin: 'B083GB6VGC',
     name: 'Hydro Flask Water Bottle with Flex Cap',
@@ -50,6 +50,11 @@ const PRODUCT_MAPPINGS = {
     asin: 'B07KRFQMS7',
     name: 'BCOZZY Chin Supporting Travel Pillow',
     description: 'Ergonomic neck pillow with chin support for comfortable travel',
+  },
+  'neutrogena sunscreen': {
+    asin: 'B00008IHO3',
+    name: 'Neutrogena Ultra Sheer Dry-Touch Sunscreen SPF 45',
+    description: 'Lightweight, fast-absorbing sunscreen with Dry-Touch technology and broad spectrum UVA/UVB protection',
   },
 } as const;
 
