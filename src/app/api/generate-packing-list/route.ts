@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { PackingList, Category, RawProductRecommendation } from '@/types/packing';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -103,16 +104,15 @@ Consider weather, activities, and practical needs. Prioritize items with good re
       temperature: 0.7,
     });
 
-    const rawPackingList = JSON.parse(completion.choices[0].message.content || '{}');
+    const rawPackingList = JSON.parse(completion.choices[0].message.content || '{}') as PackingList;
 
     // Process the packing list to add affiliate links
-    const processedPackingList = {
-      ...rawPackingList,
-      categories: rawPackingList.categories.map((category: any) => ({
+    const processedPackingList: PackingList = {
+      categories: rawPackingList.categories.map((category: Category) => ({
         ...category,
-        items: category.items.map((item: any) => ({
+        items: category.items.map((item) => ({
           ...item,
-          recommendations: item.recommendations.map((rec: any) => {
+          recommendations: item.recommendations.map((rec: RawProductRecommendation) => {
             const productKey = rec.productKey?.toLowerCase();
             const mappedProduct = productKey && PRODUCT_MAPPINGS[productKey as keyof typeof PRODUCT_MAPPINGS];
             

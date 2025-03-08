@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { format } from 'date-fns';
-import { CalendarIcon, MapPinIcon, ClipboardDocumentListIcon } from '@heroicons/react/24/outline';
+import { MapPinIcon, ClipboardDocumentListIcon } from '@heroicons/react/24/outline';
 import PackingList from '@/components/PackingList';
+import { PackingList as PackingListType } from '@/types/packing';
 
 export default function Home() {
   const [tripDetails, setTripDetails] = useState({
@@ -13,7 +14,7 @@ export default function Home() {
     activities: '',
   });
   const [isLoading, setIsLoading] = useState(false);
-  const [packingList, setPackingList] = useState<any>(null);
+  const [packingList, setPackingList] = useState<PackingListType | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
