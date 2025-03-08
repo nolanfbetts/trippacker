@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { format } from 'date-fns';
 import { MapPinIcon, ClipboardDocumentListIcon } from '@heroicons/react/24/outline';
 import PackingList from '@/components/PackingList';
 import { PackingList as PackingListType } from '@/types/packing';
