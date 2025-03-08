@@ -124,7 +124,7 @@ Consider weather, activities, and practical needs. Prioritize items with good re
               };
             }
             
-            // Fallback for products not in our mapping
+            // Always provide an affiliate link, even for fallback cases
             return {
               name: rec.name,
               description: rec.description,

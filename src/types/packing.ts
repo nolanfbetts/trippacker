@@ -1,8 +1,7 @@
 export interface ProductRecommendation {
   name: string;
   description: string;
-  productKey?: string;
-  affiliateLink?: string;
+  affiliateLink: string;
 }
 
 export interface PackingItem {
