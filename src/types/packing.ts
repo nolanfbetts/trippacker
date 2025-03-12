@@ -22,5 +22,5 @@ export interface PackingList {
 export interface RawProductRecommendation {
   name: string;
   description: string;
-  productKey?: string;
+  amazonUrl?: string;
 } 

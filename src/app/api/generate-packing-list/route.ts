@@ -9,64 +9,147 @@ const openai = new OpenAI({
 // Your Amazon Associates ID
 const AMAZON_AFFILIATE_ID = process.env.AMAZON_AFFILIATE_ID || 'trippacker-20';
 
+// Constants for timeouts and delays
+const AMAZON_REQUEST_TIMEOUT = 5000; // 5 seconds timeout for Amazon requests
+const DELAY_BETWEEN_REQUESTS = 500; // 500ms delay between requests
+const MAX_CONCURRENT_REQUESTS = 3; // Maximum number of concurrent requests
+
 // Function to generate Amazon affiliate link
 function generateAmazonAffiliateLink(asin: string): string {
   return `https://www.amazon.com/dp/${asin}/ref=nosim?tag=${AMAZON_AFFILIATE_ID}`;
 }
 
-// Common product mappings with their ASINs
-const PRODUCT_MAPPINGS = {
-  // Clothing
-  'uniqlo ultra light down jacket': {
-    asin: 'B07XBN5DXN',
-    name: 'Ultra Light Down Jacket',
-    description: 'Lightweight, packable down jacket perfect for layering',
-  },
-  'columbia fleece jacket': {
-    asin: 'B009P5JSGO',
-    name: 'Columbia Men\'s Steens Mountain Full Zip Fleece Jacket',
-    description: 'Warm and comfortable fleece jacket for cool weather',
-  },
+// Function to search Amazon and get the first product's ASIN with timeout
+async function searchAmazonAndGetAsin(productName: string): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), AMAZON_REQUEST_TIMEOUT);
+
+    const searchUrl = `https://www.amazon.com/s?k=${encodeURIComponent(productName)}&ref=nb_sb_noss_2&rh=n%3A283155%2Cp_85%3A2470955011`;
+    
+    const response = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive'
+      },
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      console.error(`Failed to fetch Amazon search results: ${response.status} ${response.statusText}`);
+      return null;
+    }
+
+    const html = await response.text();
+    
+    // Try to find ASIN using various patterns
+    const patterns = [
+      /data-asin="([A-Z0-9]{10})"[^>]*data-index="1"/,
+      /data-asin="([A-Z0-9]{10})"[^>]*data-component-type="s-search-result"/,
+      /\/dp\/([A-Z0-9]{10})(?:\/|\?|$)/,
+      /"asin":"([A-Z0-9]{10})"/,
+      /data-asin="([A-Z0-9]{10})"/
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match && match[1] && /^[A-Z0-9]{10}$/.test(match[1])) {
+        return match[1];
+      }
+    }
+
+    return null;
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        console.warn(`Amazon search timed out for: ${productName}`);
+      } else {
+        console.error('Error searching Amazon:', error);
+      }
+    } else {
+      console.error('Unknown error searching Amazon:', error);
+    }
+    return null;
+  }
+}
+
+// Process recommendations in batches to limit concurrent requests
+async function processBatch(recommendations: RawProductRecommendation[], startIndex: number, batchSize: number) {
+  const batch = recommendations.slice(startIndex, startIndex + batchSize);
+  const results = await Promise.all(
+    batch.map(async (rec) => {
+      try {
+        const asin = await searchAmazonAndGetAsin(rec.name);
+        return {
+          name: rec.name,
+          description: rec.description,
+          affiliateLink: asin 
+            ? generateAmazonAffiliateLink(asin)
+            : `https://www.amazon.com/s?k=${encodeURIComponent(rec.name)}&tag=${AMAZON_AFFILIATE_ID}`
+        };
+      } catch (error) {
+        console.error(`Error processing recommendation for ${rec.name}:`, error);
+        return {
+          name: rec.name,
+          description: rec.description,
+          affiliateLink: `https://www.amazon.com/s?k=${encodeURIComponent(rec.name)}&tag=${AMAZON_AFFILIATE_ID}`
+        };
+      }
+    })
+  );
   
-  // Travel Gear
-  'anker powercore': {
-    asin: 'B07S829LBX',
-    name: 'Anker PowerCore 10000 Portable Charger',
-    description: 'Ultra-compact 10000mAh power bank with PowerIQ technology',
-  },
-  'travel adapter': {
-    asin: 'B07T66GG68',
-    name: 'EPICKA Universal Travel Adapter',
-    description: 'All-in-one international power adapter with USB ports',
-  },
+  if (startIndex + batchSize < recommendations.length) {
+    await delay(DELAY_BETWEEN_REQUESTS);
+  }
   
-  // Comfort & Health
-  'hydro flask': {
-    asin: 'B083GB6VGC',
-    name: 'Hydro Flask Water Bottle with Flex Cap',
-    description: 'Vacuum insulated stainless steel water bottle, keeps drinks cold for 24 hours',
-  },
-  'neck pillow': {
-    asin: 'B07KRFQMS7',
-    name: 'BCOZZY Chin Supporting Travel Pillow',
-    description: 'Ergonomic neck pillow with chin support for comfortable travel',
-  },
-  'neutrogena sunscreen': {
-    asin: 'B00008IHO3',
-    name: 'Neutrogena Ultra Sheer Dry-Touch Sunscreen SPF 45',
-    description: 'Lightweight, fast-absorbing sunscreen with Dry-Touch technology and broad spectrum UVA/UVB protection',
-  },
-} as const;
+  return results;
+}
+
+// Process all recommendations with batching
+async function processAllRecommendations(recommendations: RawProductRecommendation[]) {
+  const results = [];
+  for (let i = 0; i < recommendations.length; i += MAX_CONCURRENT_REQUESTS) {
+    const batchResults = await processBatch(recommendations, i, MAX_CONCURRENT_REQUESTS);
+    results.push(...batchResults);
+  }
+  return results;
+}
+
+// Add delay between requests
+function delay(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 export async function POST(request: Request) {
   try {
-    const { startDate, endDate, location, activities } = await request.json();
+    const { startDate, endDate, location, activities, gender, priceRange } = await request.json();
 
-    const prompt = `Generate a detailed packing list for a trip to ${location} from ${startDate} to ${endDate}. ${
-      activities ? `The planned activities include: ${activities}.` : ''
+    // Build the prompt with optional parameters
+    let prompt = `Generate a detailed packing list for a trip to ${location} from ${startDate} to ${endDate}.`;
+    
+    if (activities) {
+      prompt += `\n\nThe planned activities include: ${activities}.`;
+    }
+    
+    if (gender) {
+      prompt += `\nThe packing list is for a ${gender} traveler.`;
+    }
+    
+    if (priceRange) {
+      const priceRangeDescriptions = {
+        'budget': 'budget-friendly items',
+        'mid-range': 'mid-range items',
+        'premium': 'premium quality items'
+      };
+      prompt += `\nPlease focus on ${priceRangeDescriptions[priceRange as keyof typeof priceRangeDescriptions]}.`;
     }
 
-Please provide specific product recommendations that would be available on Amazon.com. Focus on practical, highly-rated items that travelers would actually need.
+    prompt += `\n\nPlease provide specific product recommendations that would be available on Amazon.com. Focus on practical, highly-rated items that travelers would actually need. Make sure to include appropriate weather-specific items based on the weather information provided.
 
 Please provide a structured response in the following JSON format:
 {
@@ -80,25 +163,25 @@ Please provide a structured response in the following JSON format:
           "recommendations": [
             {
               "name": "Specific Product Name (include brand)",
-              "description": "Brief product description with key features",
-              "productKey": "key that matches common products mapping"
+              "description": "Brief product description with key features"
             }
           ]
         }
       ]
     }
   ]
-}
-
-Focus on essential items and popular brands available on Amazon. Be specific with product names and include well-known brands.
-Consider weather, activities, and practical needs. Prioritize items with good reviews and reliable brands.`;
+}`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
         {
           role: "system",
-          content: "You are a travel packing expert who creates detailed, personalized packing lists with specific product recommendations. Focus on practical, well-reviewed items from reputable brands available on Amazon."
+          content: `You are a travel packing expert who creates detailed, personalized packing lists with specific product recommendations. Focus on practical, well-reviewed items from reputable brands available on Amazon. ${
+            gender ? `Consider gender-specific needs and preferences.` : ''
+          } ${
+            priceRange ? `Focus on products within the specified price range.` : ''
+          } Please limit recommendations to 2-3 items per category to ensure efficient processing.`
         },
         {
           role: "user",
@@ -111,33 +194,15 @@ Consider weather, activities, and practical needs. Prioritize items with good re
 
     const rawPackingList = JSON.parse(completion.choices[0].message.content || '{}') as PackingList;
 
-    // Process the packing list to add affiliate links
+    // Process the packing list to add affiliate links with optimized concurrent processing
     const processedPackingList: PackingList = {
-      categories: rawPackingList.categories.map((category: Category) => ({
+      categories: await Promise.all(rawPackingList.categories.map(async (category: Category) => ({
         ...category,
-        items: category.items.map((item) => ({
+        items: await Promise.all(category.items.map(async (item) => ({
           ...item,
-          recommendations: item.recommendations.map((rec: RawProductRecommendation) => {
-            const productKey = rec.productKey?.toLowerCase();
-            const mappedProduct = productKey && PRODUCT_MAPPINGS[productKey as keyof typeof PRODUCT_MAPPINGS];
-            
-            if (mappedProduct) {
-              return {
-                name: mappedProduct.name,
-                description: mappedProduct.description,
-                affiliateLink: generateAmazonAffiliateLink(mappedProduct.asin)
-              };
-            }
-            
-            // Always provide an affiliate link, even for fallback cases
-            return {
-              name: rec.name,
-              description: rec.description,
-              affiliateLink: `https://www.amazon.com/s?k=${encodeURIComponent(rec.name)}&tag=${AMAZON_AFFILIATE_ID}`
-            };
-          })
-        }))
-      }))
+          recommendations: await processAllRecommendations(item.recommendations)
+        })))
+      })))
     };
 
     return NextResponse.json(processedPackingList);
